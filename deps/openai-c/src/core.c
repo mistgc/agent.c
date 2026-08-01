@@ -26,16 +26,27 @@
 #include "openai_internal.h"
 
 char* api_key = NULL;
+char* base_url = NULL;
 
-void openai_init(const char* key) {
+void openai_init(const char* key, const char* url) {
     if (api_key) free(api_key);
-    api_key = strdup(key);
+    api_key = key ? strdup(key) : NULL;
+
+    if (base_url) free(base_url);
+    if (!url || strlen(url) == 0) {
+        base_url = strdup("https://api.openai.com/v1/chat/completions");
+    } else {
+        base_url = strdup(url);
+    }
+
     curl_global_init(CURL_GLOBAL_DEFAULT);
 }
 
 void openai_cleanup() {
     if (api_key) free(api_key);
     api_key = NULL;
+    if (base_url) free(base_url);
+    base_url = NULL;
     curl_global_cleanup();
 }
 

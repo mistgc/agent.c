@@ -14,7 +14,7 @@ int main() {
         return 1;
     }
 
-    openai_init(api_key);
+    openai_init(api_key, NULL);
 
     char* res = openai_create_embedding_json(prompt, model);
     if (res) {

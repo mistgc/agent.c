@@ -19,7 +19,7 @@ all: $(TARGET)
 $(TARGET): $(OBJS) $(LIBOPENAI)
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
-$(LIBOPENAI):
+$(LIBOPENAI): $(shell find deps/openai-c/src deps/openai-c/include -name '*.c' -o -name '*.h')
 	mkdir -p $(dir $@)
 	$(CMAKE) -B build/libopenai -S deps/openai-c
 	$(MAKE) -C build/libopenai -j4

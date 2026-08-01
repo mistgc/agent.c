@@ -42,7 +42,7 @@ extern "C" {
  *
  * @param api_key Your OpenAI API key.
  */
-void openai_init(const char* api_key);
+void openai_init(const char* api_key, const char* base_url);
 
 /**
  * @brief Cleans up any resources used by the OpenAI client.

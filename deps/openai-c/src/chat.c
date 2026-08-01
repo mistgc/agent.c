@@ -26,10 +26,11 @@
 #include "openai_internal.h"
 
 extern char* api_key;
+extern char* base_url;
 extern size_t write_callback(void*, size_t, size_t, void*);
 
 char* openai_chat_with_model(const char* prompt, const char* model) {
-    if (!api_key || !prompt || !model) return NULL;
+    if (!api_key || !base_url || !prompt || !model) return NULL;
 
     CURL* curl = curl_easy_init();
     if (!curl) return NULL;
@@ -54,37 +55,53 @@ char* openai_chat_with_model(const char* prompt, const char* model) {
 
     char* json = cJSON_PrintUnformatted(rt);
 
-    curl_easy_setopt(curl, CURLOPT_URL, "https://api.openai.com/v1/chat/completions");
+    curl_easy_setopt(curl, CURLOPT_URL, base_url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*)&chunk);
 
     CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
-    curl_slist_free_all(headers);
-    free(json);
-    cJSON_Delete(rt);
-
     if (res != CURLE_OK) {
+        fprintf(stderr, "openai_chat_with_model: curl error: %s\n", curl_easy_strerror(res));
         free(chunk.response);
+        curl_easy_cleanup(curl);
+        curl_slist_free_all(headers);
+        free(json);
+        cJSON_Delete(rt);
         return NULL;
     }
 
     cJSON* root = cJSON_Parse(chunk.response);
     if (!root) {
+        fprintf(stderr, "openai_chat_with_model: failed to parse API response: %.500s\n", chunk.response);
         free(chunk.response);
+        curl_easy_cleanup(curl);
+        curl_slist_free_all(headers);
+        free(json);
+        cJSON_Delete(rt);
         return NULL;
     }
 
     cJSON* choices = cJSON_GetObjectItem(root, "choices");
-    cJSON* first_choice = cJSON_GetArrayItem(choices, 0);
-    cJSON* message = cJSON_GetObjectItem(first_choice, "message");
-    cJSON* content = cJSON_GetObjectItem(message, "content");
+    cJSON* first_choice = choices ? cJSON_GetArrayItem(choices, 0) : NULL;
+    cJSON* message = first_choice ? cJSON_GetObjectItem(first_choice, "message") : NULL;
+    cJSON* content = message ? cJSON_GetObjectItem(message, "content") : NULL;
 
     char* result = (cJSON_IsString(content)) ? strdup(content->valuestring) : NULL;
+    if (!result) {
+        cJSON* err = cJSON_GetObjectItem(root, "error");
+        char* err_str = err ? cJSON_PrintUnformatted(err) : NULL;
+        fprintf(stderr, "openai_chat_with_model: no content in API response%s%s\n",
+                err_str ? ": " : "", err_str ? err_str : "");
+        free(err_str);
+    }
     cJSON_Delete(root);
     free(chunk.response);
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+    free(json);
+    cJSON_Delete(rt);
     return result;
 }
 

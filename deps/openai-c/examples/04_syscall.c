@@ -36,7 +36,7 @@ int main() {
         return 1;
     }
 
-    openai_init(api_key);
+    openai_init(api_key, NULL);
 
     char* syscall_log = read_syscall_log("example_strace.log");
     if (!syscall_log) {

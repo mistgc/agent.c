@@ -13,7 +13,7 @@ int main() {
         return 1;
     }
 
-    openai_init(api_key);
+    openai_init(api_key, NULL);
 
     char* urls = openai_generate_image(prompt, 2, "512x512");
     if (urls) {

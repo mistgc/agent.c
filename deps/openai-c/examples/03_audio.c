@@ -13,7 +13,7 @@ int main() {
         return 1;
     }
 
-    openai_init(api_key);
+    openai_init(api_key, NULL);
 
     char* result = openai_transcribe_audio(audio_file);
     char* result_trans = openai_translate_audio(audio_file);

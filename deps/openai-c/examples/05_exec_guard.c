@@ -21,7 +21,7 @@ int main() {
         return 1;
     }
 
-    openai_init(api_key);
+    openai_init(api_key, NULL);
 
     char* res = openai_chat_with_model(prompt, model);
     if (res) {
