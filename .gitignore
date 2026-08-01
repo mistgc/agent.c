@@ -1,3 +1,4 @@
 build
 agent
 .env
+compile_commands.json
