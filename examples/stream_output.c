@@ -20,9 +20,6 @@
  * 缓冲区, 按 '\n' 切出完整行处理, 残留在缓冲区头部的半行留到下次。
  */
 
-static char sse_buf[65536];
-static size_t sse_len = 0;
-
 static void handle_sse_line(const char *line, size_t len) {
     if (len == 0 || line[0] == ':')
         return;
@@ -56,40 +53,6 @@ static void handle_sse_line(const char *line, size_t len) {
     cJSON_Delete(root);
 }
 
-static size_t cb(char *data, size_t size, size_t nmemb, void *userdata) {
-    size_t realsize = size * nmemb;
-    (void)userdata;
-
-    if (sse_len + realsize > sizeof sse_buf)
-        sse_len = 0;
-
-    memcpy(sse_buf + sse_len, data, realsize);
-    sse_len += realsize;
-    sse_buf[sse_len] = '\0';
-
-    char *start = sse_buf;
-    while (sse_len > (size_t)(start - sse_buf)) {
-        char *nl = memchr(start, '\n', sse_len - (size_t)(start - sse_buf));
-        if (!nl)
-            break;
-
-        size_t line_len = (size_t)(nl - start);
-        if (line_len > 0 && start[line_len - 1] == '\r')
-            line_len--; /* 兼容 CRLF 行尾 */
-        handle_sse_line(start, line_len);
-
-        start = nl + 1;
-    }
-
-    size_t rest = sse_len - (size_t)(start - sse_buf);
-    if (rest > 0 && start != sse_buf)
-        memmove(sse_buf, start, rest);
-    sse_len = rest;
-    sse_buf[sse_len] = '\0';
-
-    return realsize;
-}
-
 int main() {
     if (load_dotenv(".env") != 0) {
         fprintf(stderr, "error: could not load .env\n");
@@ -108,7 +71,7 @@ int main() {
 
     openai_init(key, url);
 
-    int rc = chat_complete_stream(cb, prompt, model, NULL);
+    int rc = chat_complete_stream(handle_sse_line, prompt, model);
     if (rc != CURLE_OK) {
         fprintf(stderr, "\nerror: stream failed: %s\n", curl_easy_strerror(rc));
         return 1;
