@@ -3,9 +3,10 @@
 #include <string.h>
 
 #include <cjson/cJSON.h>
-#include <openai.h>
+#include <curl/curl.h>
 
 #include "../src/call_llm.h"
+#include "../src/config.h"
 #include "../src/dotenv.h"
 
 /*
@@ -21,62 +22,61 @@
  */
 
 static void handle_sse_line(const char *line, size_t len) {
-    if (len == 0 || line[0] == ':')
-        return;
+  if (len == 0 || line[0] == ':')
+    return;
 
-    if (len < 5 || strncmp(line, "data:", 5) != 0)
-        return;
-    line += 5;
-    len -= 5;
-    while (len > 0 && (*line == ' ' || *line == '\t')) {
-        line++;
-        len--;
-    }
+  if (len < 5 || strncmp(line, "data:", 5) != 0)
+    return;
+  line += 5;
+  len -= 5;
+  while (len > 0 && (*line == ' ' || *line == '\t')) {
+    line++;
+    len--;
+  }
 
-    if (len == 6 && memcmp(line, "[DONE]", 6) == 0)
-        return;
+  if (len == 6 && memcmp(line, "[DONE]", 6) == 0)
+    return;
 
-    cJSON *root = cJSON_ParseWithLength(line, len);
-    if (!root)
-        return;
+  cJSON *root = cJSON_ParseWithLength(line, len);
+  if (!root)
+    return;
 
-    cJSON *choices = cJSON_GetObjectItem(root, "choices");
-    cJSON *first = choices ? cJSON_GetArrayItem(choices, 0) : NULL;
-    cJSON *delta = first ? cJSON_GetObjectItem(first, "delta") : NULL;
-    cJSON *content = delta ? cJSON_GetObjectItem(delta, "content") : NULL;
+  cJSON *choices = cJSON_GetObjectItem(root, "choices");
+  cJSON *first = choices ? cJSON_GetArrayItem(choices, 0) : NULL;
+  cJSON *delta = first ? cJSON_GetObjectItem(first, "delta") : NULL;
+  cJSON *content = delta ? cJSON_GetObjectItem(delta, "content") : NULL;
 
-    if (cJSON_IsString(content) && content->valuestring && *content->valuestring) {
-        fputs(content->valuestring, stdout);
-        fflush(stdout); /* 立即刷出, 实现真正的逐字流式显示 */
-    }
+  if (cJSON_IsString(content) && content->valuestring &&
+      *content->valuestring) {
+    fputs(content->valuestring, stdout);
+    fflush(stdout); /* 立即刷出, 实现真正的逐字流式显示 */
+  }
 
-    cJSON_Delete(root);
+  cJSON_Delete(root);
 }
 
 int main() {
-    if (load_dotenv(".env") != 0) {
-        fprintf(stderr, "error: could not load .env\n");
-        return 1;
-    }
+  if (load_dotenv(".env") != 0) {
+    fprintf(stderr, "error: could not load .env\n");
+    return 1;
+  }
 
-    const char *key = getenv("OPENAI_API_KEY");
-    const char *url = getenv("OPENAI_BASE_URL");
-    const char *model = getenv("OPENAI_MODEL_ID");
-    const char *prompt = "Hello, who are you?";
+  if (config_init() != 0) {
+    fprintf(stderr, "error: could not init config\n");
+    return -1;
+  }
 
-    if (!key || !*key) {
-        fprintf(stderr, "error: OPENAI_API_KEY is not set\n");
-        return 1;
-    }
+  const char *prompt = "Hello, who are you?";
 
-    openai_init(key, url);
+  int rc = chat_complete_stream(handle_sse_line, prompt, config()->model_id);
+  if (rc != CURLE_OK) {
+    fprintf(stderr, "\nerror: stream failed: %s\n", curl_easy_strerror(rc));
+    config_free();
+    return 1;
+  }
 
-    int rc = chat_complete_stream(handle_sse_line, prompt, model);
-    if (rc != CURLE_OK) {
-        fprintf(stderr, "\nerror: stream failed: %s\n", curl_easy_strerror(rc));
-        return 1;
-    }
+  config_free();
 
-    fputc('\n', stdout);
-    return 0;
+  fputc('\n', stdout);
+  return 0;
 }

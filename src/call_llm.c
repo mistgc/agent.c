@@ -1,14 +1,12 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include <cjson/cJSON.h>
 #include <curl/curl.h>
-#include <openai.h>
 
+#include "config.h"
 #include "call_llm.h"
-
-extern char *api_key;
-extern char *base_url;
 
 static char _sse_buf[65536];
 static size_t _sse_len = 0;
@@ -33,7 +31,7 @@ static size_t _stream_callback_for_sse(char *data, size_t size, size_t nmemb,
 
         size_t line_len = (size_t)(nl - start);
         if (line_len > 0 && start[line_len - 1] == '\r')
-            line_len--; /* 兼容 CRLF 行尾 */
+            line_len--; /* CRLF */
         cb(start, line_len);
 
         start = nl + 1;
@@ -48,14 +46,9 @@ static size_t _stream_callback_for_sse(char *data, size_t size, size_t nmemb,
     return realsize;
 }
 
-int chat_complete(char **msg, const char *prompt, const char *model_id) {
-  *msg = openai_chat_with_model(prompt, model_id);
-  return *msg ? (int)strlen(*msg) : -1;
-}
-
 int chat_complete_stream(chat_complete_stream_sse_callback sse_cb, const char *prompt,
                          const char *model_id) {
-  if (!api_key || !base_url || !model_id || !prompt)
+  if (!config()->api_key || !config()->base_url || !model_id || !prompt)
     return -1;
 
   CURL *c = NULL;
@@ -72,7 +65,7 @@ int chat_complete_stream(chat_complete_stream_sse_callback sse_cb, const char *p
   headers = curl_slist_append(headers, "Accept: text/event-stream");
   char auth_header[512];
   snprintf(auth_header, sizeof auth_header, "Authorization: Bearer %s",
-           api_key);
+           config()->api_key);
   headers = curl_slist_append(headers, auth_header);
   if (!headers)
     goto cleanup;
@@ -96,7 +89,7 @@ int chat_complete_stream(chat_complete_stream_sse_callback sse_cb, const char *p
   if (!json)
     goto cleanup;
 
-  curl_easy_setopt(c, CURLOPT_URL, base_url);
+  curl_easy_setopt(c, CURLOPT_URL, config()->base_url);
   curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
   curl_easy_setopt(c, CURLOPT_POSTFIELDS, json);
   curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, _stream_callback_for_sse);
