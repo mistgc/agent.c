@@ -97,6 +97,11 @@ int chat_complete_stream(chat_complete_stream_sse_callback sse_cb, const char *p
 
   res = curl_easy_perform(c);
 
+  long http = 0;
+  curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http);
+  if (res == CURLE_OK && http >= 400)
+    res = CURLE_HTTP_RETURNED_ERROR;
+
 cleanup:
   if (json)
     free(json);
