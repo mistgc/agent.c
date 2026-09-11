@@ -24,6 +24,8 @@ int config_init() {
         if (_config->model_id == NULL) {
             _config->model_id = "deepseek-v4-flash";
         }
+
+        _config->tavily_api_key = getenv("TAVILY_API_KEY");
         return 0;
     } else {
         fprintf(stderr, "error: The config has been inited.");

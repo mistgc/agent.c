@@ -5,6 +5,7 @@ typedef struct config {
   char *api_key;
   char *base_url;
   char *model_id;
+  char *tavily_api_key;
 } config_t;
 
 int config_init();
