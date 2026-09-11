@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <cjson/cJSON.h>
 #include <curl/curl.h>
@@ -12,6 +13,19 @@
 
 #define MAX_TURNS 20
 
+/* 终端着色: 非 tty (管道/重定向) 时自动关闭, 避免转义码污染输出 */
+#define C_USER "\033[36m"   /* 青: 用户输入 */
+#define C_ASSIST "\033[32m" /* 绿: Agent 输出 */
+#define C_TOOL "\033[33m"   /* 黄: 工具执行 */
+#define C_RESET "\033[0m"
+
+static const char *col(const char *code) {
+  static int tty = -1;
+  if (tty < 0)
+    tty = isatty(STDOUT_FILENO);
+  return tty ? code : "";
+}
+
 /* Assistant 标签在首个 delta 到来时惰性打印, 避免空气泡 */
 static int _assistant_started = 0;
 
@@ -20,6 +34,7 @@ static void print_delta(const char *text, size_t len) {
     return;
   if (!_assistant_started) {
     _assistant_started = 1;
+    fputs(col(C_ASSIST), stdout);
     fputs("Assistant: ", stdout);
   }
   fwrite(text, 1, len, stdout);
@@ -34,12 +49,14 @@ static void run_agent(cJSON *messages, cJSON *tools) {
     _assistant_started = 0;
     int rc = chat_complete_stream(messages, tools, print_delta, &r);
     if (rc != CURLE_OK) {
-      fprintf(stderr, "\nerror: stream failed: %s\n", curl_easy_strerror(rc));
+      fprintf(stderr, "%s\nerror: stream failed: %s\n", col(C_RESET),
+              curl_easy_strerror(rc));
       chat_result_free(&r);
       return;
     }
     if (r.content && r.content[0]) {
       fputc('\n', stdout);
+      fputs(col(C_RESET), stdout);
       fflush(stdout);
     }
 
@@ -76,8 +93,8 @@ static void run_agent(cJSON *messages, cJSON *tools) {
     cJSON_AddItemToArray(messages, asst);
 
     for (int i = 0; i < r.n_tool_calls; i++) {
-      fprintf(stderr, "Tool: %s(%s)\n", r.tool_calls[i].name,
-              r.tool_calls[i].arguments);
+      fprintf(stderr, "%sTool: %s(%s)%s\n", col(C_TOOL), r.tool_calls[i].name,
+              r.tool_calls[i].arguments, col(C_RESET));
       char *result = tool_invoke(r.tool_calls[i].name, r.tool_calls[i].arguments);
       cJSON *tm = cJSON_CreateObject();
       cJSON_AddStringToObject(tm, "role", "tool");
@@ -99,13 +116,18 @@ static char *read_input(void) {
   char line[4096];
   int cont = 0;
   for (;;) {
+    fputs(col(C_USER), stdout);
     fputs(cont ? "... " : "User: ", stdout);
     fflush(stdout);
     if (!fgets(line, sizeof line, stdin)) {
+      fputs(col(C_RESET), stdout);
+      fflush(stdout);
       if (!buf)
         return NULL; /* EOF 且无任何输入 */
       break;
     }
+    fputs(col(C_RESET), stdout);
+    fflush(stdout);
     size_t n = strlen(line);
     while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
       line[--n] = '\0';
