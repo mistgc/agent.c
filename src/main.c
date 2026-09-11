@@ -12,7 +12,16 @@
 
 #define MAX_TURNS 20
 
+/* Assistant 标签在首个 delta 到来时惰性打印, 避免空气泡 */
+static int _assistant_started = 0;
+
 static void print_delta(const char *text, size_t len) {
+  if (len == 0)
+    return;
+  if (!_assistant_started) {
+    _assistant_started = 1;
+    fputs("Assistant: ", stdout);
+  }
   fwrite(text, 1, len, stdout);
   fflush(stdout);
 }
@@ -22,14 +31,17 @@ static void run_agent(cJSON *messages, cJSON *tools) {
   int turns = 0;
   while (1) {
     chat_result_t r = {0};
+    _assistant_started = 0;
     int rc = chat_complete_stream(messages, tools, print_delta, &r);
     if (rc != CURLE_OK) {
       fprintf(stderr, "\nerror: stream failed: %s\n", curl_easy_strerror(rc));
       chat_result_free(&r);
       return;
     }
-    if (r.content)
+    if (r.content && r.content[0]) {
       fputc('\n', stdout);
+      fflush(stdout);
+    }
 
     if (r.n_tool_calls == 0) {
       cJSON *asst = cJSON_CreateObject();
@@ -64,7 +76,7 @@ static void run_agent(cJSON *messages, cJSON *tools) {
     cJSON_AddItemToArray(messages, asst);
 
     for (int i = 0; i < r.n_tool_calls; i++) {
-      fprintf(stderr, "[tool] %s(%s)\n", r.tool_calls[i].name,
+      fprintf(stderr, "Tool: %s(%s)\n", r.tool_calls[i].name,
               r.tool_calls[i].arguments);
       char *result = tool_invoke(r.tool_calls[i].name, r.tool_calls[i].arguments);
       cJSON *tm = cJSON_CreateObject();
@@ -87,7 +99,7 @@ static char *read_input(void) {
   char line[4096];
   int cont = 0;
   for (;;) {
-    fputs(cont ? "... " : "> ", stdout);
+    fputs(cont ? "... " : "User: ", stdout);
     fflush(stdout);
     if (!fgets(line, sizeof line, stdin)) {
       if (!buf)
