@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <cjson/cJSON.h>
@@ -12,6 +13,30 @@
 #include "tools/tool_base.h"
 
 #define MAX_TURNS 20
+
+/*
+ * 开启 IUTF8: 让内核行规程按 UTF-8 字符 (而非字节) 处理 backspace。
+ * 否则中文等 3 字节字符按一次删除键只掉 1 字节, 剩下的乱码像是删不干净。
+ */
+static struct termios _saved_termios;
+
+static void restore_terminal(void) {
+  tcsetattr(STDIN_FILENO, TCSANOW, &_saved_termios);
+}
+
+static void enable_utf8_input(void) {
+  if (!isatty(STDIN_FILENO))
+    return;
+  struct termios t;
+  if (tcgetattr(STDIN_FILENO, &t) != 0)
+    return;
+  if (t.c_iflag & IUTF8)
+    return; /* 已开启, 无需改动 */
+  _saved_termios = t;
+  t.c_iflag |= IUTF8;
+  if (tcsetattr(STDIN_FILENO, TCSANOW, &t) == 0)
+    atexit(restore_terminal);
+}
 
 /* 终端着色: 非 tty (管道/重定向) 时自动关闭, 避免转义码污染输出 */
 #define C_USER "\033[36m"   /* 青: 用户输入 */
@@ -156,6 +181,8 @@ static char *read_input(void) {
 }
 
 int main(int argc, char **argv) {
+  enable_utf8_input();
+
   if (load_dotenv(".env") != 0) {
     fprintf(stderr, "error: could not load .env\n");
     return 1;
