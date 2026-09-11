@@ -79,6 +79,48 @@ static void run_agent(cJSON *messages, cJSON *tools) {
   }
 }
 
+/* 读取一条用户输入 (可多行): 行尾反斜杠 \ 表示续行, 否则提交。
+ * 返回 malloc 的字符串 (已去续行符); 无输入即 EOF 时返回 NULL。 */
+static char *read_input(void) {
+  char *buf = NULL;
+  size_t len = 0;
+  char line[4096];
+  int cont = 0;
+  for (;;) {
+    fputs(cont ? "... " : "> ", stdout);
+    fflush(stdout);
+    if (!fgets(line, sizeof line, stdin)) {
+      if (!buf)
+        return NULL; /* EOF 且无任何输入 */
+      break;
+    }
+    size_t n = strlen(line);
+    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
+      line[--n] = '\0';
+
+    cont = 0;
+    if (n > 0 && line[n - 1] == '\\') {
+      line[--n] = '\0';
+      cont = 1;
+    }
+
+    char *np = realloc(buf, len + n + 2);
+    if (!np)
+      break;
+    buf = np;
+    memcpy(buf + len, line, n);
+    len += n;
+    buf[len++] = '\n';
+    buf[len] = '\0';
+
+    if (!cont)
+      break;
+  }
+  if (buf && len > 0 && buf[len - 1] == '\n')
+    buf[len - 1] = '\0';
+  return buf;
+}
+
 int main(int argc, char **argv) {
   if (load_dotenv(".env") != 0) {
     fprintf(stderr, "error: could not load .env\n");
@@ -95,31 +137,27 @@ int main(int argc, char **argv) {
 
   /* 命令行首条 prompt (可选): ./agent "question" */
   const char *initial = argc > 1 ? argv[1] : NULL;
-  char line[4096];
 
   while (1) {
-    if (initial) {
-      snprintf(line, sizeof line, "%s", initial);
-      initial = NULL;
-    } else {
-      fputs("> ", stdout);
-      fflush(stdout);
-      if (!fgets(line, sizeof line, stdin))
-        break; /* EOF (Ctrl-D) */
+    char *input = initial ? strdup(initial) : read_input();
+    initial = NULL;
+    if (!input)
+      break; /* EOF (Ctrl-D) */
 
-      size_t n = strlen(line);
-      while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
-        line[--n] = '\0';
-      if (n == 0)
-        continue;
-      if (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0)
-        break;
+    if (input[0] == '\0') {
+      free(input);
+      continue;
+    }
+    if (strcmp(input, "exit") == 0 || strcmp(input, "quit") == 0) {
+      free(input);
+      break;
     }
 
     cJSON *user = cJSON_CreateObject();
     cJSON_AddStringToObject(user, "role", "user");
-    cJSON_AddStringToObject(user, "content", line);
+    cJSON_AddStringToObject(user, "content", input);
     cJSON_AddItemToArray(messages, user);
+    free(input);
 
     run_agent(messages, tools);
   }
