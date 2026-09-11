@@ -10,50 +10,40 @@
 #include "dotenv.h"
 #include "tools/tool_base.h"
 
+#define MAX_TURNS 20
+
 static void print_delta(const char *text, size_t len) {
   fwrite(text, 1, len, stdout);
   fflush(stdout);
 }
 
-int main(int argc, char **argv) {
-  if (load_dotenv(".env") != 0) {
-    fprintf(stderr, "error: could not load .env\n");
-    return 1;
-  }
-
-  if (config_init() != 0) {
-    fprintf(stderr, "error: could not init config\n");
-    return 1;
-  }
-
-  const char *prompt =
-      argc > 1 ? argv[1] : "What is the latest news about OpenAI?";
-
-  cJSON *messages = cJSON_CreateArray();
-  cJSON *user = cJSON_CreateObject();
-  cJSON_AddStringToObject(user, "role", "user");
-  cJSON_AddStringToObject(user, "content", prompt);
-  cJSON_AddItemToArray(messages, user);
-
-  cJSON *tools = tools_schema();
-
-  for (int turn = 0; turn < 5; turn++) {
+/* 跑一次用户回合的 agent loop: 模型请求工具就执行回填, 直到给出最终回答 */
+static void run_agent(cJSON *messages, cJSON *tools) {
+  int turns = 0;
+  while (1) {
     chat_result_t r = {0};
     int rc = chat_complete_stream(messages, tools, print_delta, &r);
     if (rc != CURLE_OK) {
       fprintf(stderr, "\nerror: stream failed: %s\n", curl_easy_strerror(rc));
       chat_result_free(&r);
-      break;
+      return;
     }
     if (r.content)
       fputc('\n', stdout);
 
     if (r.n_tool_calls == 0) {
+      cJSON *asst = cJSON_CreateObject();
+      cJSON_AddStringToObject(asst, "role", "assistant");
+      cJSON_AddStringToObject(asst, "content", r.content ? r.content : "");
+      cJSON_AddItemToArray(messages, asst);
       chat_result_free(&r);
-      break;
+      return;
+    }
+    if (++turns >= MAX_TURNS) {
+      chat_result_free(&r);
+      return;
     }
 
-    /* 回填 assistant 的 tool_calls, 再逐个执行并追加 tool 结果 */
     cJSON *asst = cJSON_CreateObject();
     cJSON_AddStringToObject(asst, "role", "assistant");
     if (r.content)
@@ -86,6 +76,52 @@ int main(int argc, char **argv) {
     }
 
     chat_result_free(&r);
+  }
+}
+
+int main(int argc, char **argv) {
+  if (load_dotenv(".env") != 0) {
+    fprintf(stderr, "error: could not load .env\n");
+    return 1;
+  }
+
+  if (config_init() != 0) {
+    fprintf(stderr, "error: could not init config\n");
+    return 1;
+  }
+
+  cJSON *messages = cJSON_CreateArray();
+  cJSON *tools = tools_schema();
+
+  /* 命令行首条 prompt (可选): ./agent "question" */
+  const char *initial = argc > 1 ? argv[1] : NULL;
+  char line[4096];
+
+  while (1) {
+    if (initial) {
+      snprintf(line, sizeof line, "%s", initial);
+      initial = NULL;
+    } else {
+      fputs("> ", stdout);
+      fflush(stdout);
+      if (!fgets(line, sizeof line, stdin))
+        break; /* EOF (Ctrl-D) */
+
+      size_t n = strlen(line);
+      while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
+        line[--n] = '\0';
+      if (n == 0)
+        continue;
+      if (strcmp(line, "exit") == 0 || strcmp(line, "quit") == 0)
+        break;
+    }
+
+    cJSON *user = cJSON_CreateObject();
+    cJSON_AddStringToObject(user, "role", "user");
+    cJSON_AddStringToObject(user, "content", line);
+    cJSON_AddItemToArray(messages, user);
+
+    run_agent(messages, tools);
   }
 
   cJSON_Delete(tools);
