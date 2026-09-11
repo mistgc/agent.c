@@ -5,10 +5,12 @@
 
 /* 各工具导出的基类实例 */
 extern const tool_t web_search_tool;
+extern const tool_t bash_tool;
 
 /* 注册表: 新增工具只需要在这里加一行 */
 static const tool_t *const _registry[] = {
     &web_search_tool,
+    &bash_tool,
     NULL,
 };
 
